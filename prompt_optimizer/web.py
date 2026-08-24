@@ -1,8 +1,22 @@
 """Web UI for prompt optimizer using Streamlit."""
 
+import os
+from pathlib import Path
+
+# Load .env file
+env_path = Path(__file__).parent.parent / ".env"
+if env_path.exists():
+    for line in env_path.read_text().splitlines():
+        if "=" in line and not line.startswith("#"):
+            key, value = line.split("=", 1)
+            os.environ[key.strip()] = value.strip()
+
 import streamlit as st
 
-from .optimizer import OptimizationLevel, PromptOptimizer
+try:
+    from .optimizer import OptimizationLevel, PromptOptimizer
+except ImportError:
+    from optimizer import OptimizationLevel, PromptOptimizer
 
 
 def main():
@@ -25,10 +39,37 @@ def main():
             placeholder="Type or paste your prompt here...",
         )
 
-        level = st.select_slider(
-            "Optimization Level",
-            options=["minimal", "moderate", "aggressive"],
-            value="moderate",
+        mode = st.radio(
+            "Optimization Mode",
+            ["Rule-based", "Google Gemini (Free)", "OpenAI"],
+            horizontal=True,
+        )
+
+        if mode == "Rule-based":
+            level = st.select_slider(
+                "Optimization Level",
+                options=["minimal", "moderate", "aggressive"],
+                value="moderate",
+            )
+        elif mode == "Google Gemini (Free)":
+            api_key = st.text_input(
+                "Gemini API Key (Free)",
+                type="password",
+                value=os.getenv("GEMINI_API_KEY", ""),
+                help="Get free key from https://aistudio.google.com/apikey",
+            )
+            st.success("Free tier: 250 req/ngay, không cần credit card")
+        else:
+            api_key = st.text_input(
+                "OpenAI API Key",
+                type="password",
+                value=os.getenv("OPENAI_API_KEY", ""),
+                help="Get your key from https://platform.openai.com/api-keys",
+            )
+
+        context = st.text_input(
+            "Context (optional)",
+            placeholder="Additional context for optimization...",
         )
 
         col_btn1, col_btn2 = st.columns(2)
@@ -41,18 +82,73 @@ def main():
         st.subheader("Output")
 
         if optimize_btn and prompt_input:
-            optimizer = PromptOptimizer(OptimizationLevel(level))
-            result = optimizer.optimize(prompt_input)
+            if mode == "Rule-based":
+                optimizer = PromptOptimizer(OptimizationLevel(level))
+                result = optimizer.optimize(prompt_input)
 
-            st.markdown("**Optimized Prompt:**")
-            st.code(result.optimized, language=None)
+                st.markdown("**Optimized Prompt:**")
+                st.code(result.optimized, language=None)
 
-            st.metric("Score", f"{result.score:.1f}/100")
+                st.metric("Score", f"{result.score:.1f}/100")
 
-            if result.improvements:
-                st.markdown("**Improvements:**")
-                for imp in result.improvements:
-                    st.markdown(f"- {imp}")
+                if result.improvements:
+                    st.markdown("**Improvements:**")
+                    for imp in result.improvements:
+                        st.markdown(f"- {imp}")
+
+            elif mode == "Google Gemini (Free)":
+                if not api_key:
+                    st.error("Please enter your Gemini API key")
+                    st.info("Get free key: https://aistudio.google.com/apikey")
+                else:
+                    try:
+                        try:
+                            from .gemini_optimizer import GeminiPromptOptimizer
+                        except ImportError:
+                            from gemini_optimizer import GeminiPromptOptimizer
+
+                        with st.spinner("Optimizing with Gemini..."):
+                            ai_optimizer = GeminiPromptOptimizer(api_key=api_key)
+                            result = ai_optimizer.optimize(prompt_input, context=context)
+
+                        st.markdown("**AI-Optimized Prompt:**")
+                        st.code(result.optimized, language=None)
+
+                        st.markdown(f"**Model:** {result.model}")
+
+                        with st.expander("Explanation"):
+                            st.write(result.explanation)
+
+                    except ImportError:
+                        st.error("Install: `pip install google-generativeai`")
+                    except Exception as e:
+                        st.error(f"Error: {e}")
+
+            else:
+                if not api_key:
+                    st.error("Please enter your OpenAI API key")
+                else:
+                    try:
+                        try:
+                            from .ai_optimizer import AIPromptOptimizer
+                        except ImportError:
+                            from ai_optimizer import AIPromptOptimizer
+
+                        os.environ["OPENAI_API_KEY"] = api_key
+                        with st.spinner("Optimizing with OpenAI..."):
+                            ai_optimizer = AIPromptOptimizer(model="gpt-4o-mini")
+                            result = ai_optimizer.optimize(prompt_input, context=context)
+
+                        st.markdown("**AI-Optimized Prompt:**")
+                        st.code(result.optimized, language=None)
+
+                        with st.expander("Explanation"):
+                            st.write(result.explanation)
+
+                    except ImportError:
+                        st.error("Install: `pip install openai`")
+                    except Exception as e:
+                        st.error(f"Error: {e}")
 
         elif analyze_btn and prompt_input:
             optimizer = PromptOptimizer()
@@ -80,7 +176,7 @@ def main():
             st.info("Enter a prompt and click Optimize or Analyze")
 
     st.markdown("---")
-    st.markdown("Built with Streamlit | [GitHub](https://github.com/yourusername/prompt-optimizer)")
+    st.markdown("Built with Streamlit | [GitHub](https://github.com/lev4nte8686-alt/prompt-optimizer)")
 
 
 if __name__ == "__main__":

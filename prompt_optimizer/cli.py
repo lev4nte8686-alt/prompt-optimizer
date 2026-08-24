@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -32,6 +33,18 @@ def main():
     )
     optimize_parser.add_argument(
         "--json", action="store_true", help="Output as JSON"
+    )
+    optimize_parser.add_argument(
+        "--ai", action="store_true", help="Use AI-powered optimization (OpenAI)"
+    )
+    optimize_parser.add_argument(
+        "--opencode", action="store_true", help="Use OpenCode AI (local, no API key)"
+    )
+    optimize_parser.add_argument(
+        "--model", default="gpt-4o-mini", help="AI model (default: gpt-4o-mini)"
+    )
+    optimize_parser.add_argument(
+        "--context", help="Additional context for AI optimization"
     )
 
     analyze_parser = subparsers.add_parser("analyze", help="Analyze a prompt")
@@ -79,14 +92,50 @@ def handle_optimize(args):
         print("Error: Empty prompt", file=sys.stderr)
         sys.exit(1)
 
-    level = OptimizationLevel(args.level)
-    optimizer = PromptOptimizer(level)
-    result = optimizer.optimize(prompt)
+    if args.opencode:
+        try:
+            from .opencode_optimizer import OpenCodePromptOptimizer
+            optimizer = OpenCodePromptOptimizer()
+            result = optimizer.optimize(prompt, context=args.context)
 
-    if args.json:
-        output = json.dumps(result.to_dict(), indent=2, ensure_ascii=False)
+            output = format_opencode_result(result)
+
+        except ConnectionError:
+            print("Error: OpenCode is not running. Start OpenCode first.", file=sys.stderr)
+            sys.exit(1)
+        except ImportError:
+            print("Error: Install requests: pip install requests", file=sys.stderr)
+            sys.exit(1)
+        except Exception as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif args.ai:
+        try:
+            from .ai_optimizer import AIPromptOptimizer
+            optimizer = AIPromptOptimizer(model=args.model)
+            result = optimizer.optimize(prompt, context=args.context)
+
+            if args.json:
+                output = json.dumps(result.to_dict(), indent=2, ensure_ascii=False)
+            else:
+                output = format_ai_result(result)
+
+        except ImportError:
+            print("Error: Install openai: pip install openai", file=sys.stderr)
+            sys.exit(1)
+        except Exception as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
     else:
-        output = format_result(result)
+        level = OptimizationLevel(args.level)
+        optimizer = PromptOptimizer(level)
+        result = optimizer.optimize(prompt)
+
+        if args.json:
+            output = json.dumps(result.to_dict(), indent=2, ensure_ascii=False)
+        else:
+            output = format_result(result)
 
     if args.output:
         Path(args.output).write_text(output, encoding="utf-8")
@@ -183,6 +232,54 @@ def format_result(result) -> str:
         lines.append("")
 
     lines.append("=" * 50)
+    return "\n".join(lines)
+
+
+def format_ai_result(result) -> str:
+    """Format AI optimization result for display."""
+    lines = [
+        "=" * 50,
+        "AI PROMPT OPTIMIZATION RESULT",
+        "=" * 50,
+        "",
+        "ORIGINAL:",
+        result.original,
+        "",
+        "-" * 50,
+        "OPTIMIZED:",
+        result.optimized,
+        "",
+        "-" * 50,
+        f"Model: {result.model}",
+        "",
+        "EXPLANATION:",
+        result.explanation,
+        "",
+        "=" * 50,
+    ]
+    return "\n".join(lines)
+
+
+def format_opencode_result(result) -> str:
+    """Format OpenCode optimization result for display."""
+    lines = [
+        "=" * 50,
+        "OPENCODE AI OPTIMIZATION RESULT",
+        "=" * 50,
+        "",
+        "ORIGINAL:",
+        result.original,
+        "",
+        "-" * 50,
+        "OPTIMIZED:",
+        result.optimized,
+        "",
+        "-" * 50,
+        "EXPLANATION:",
+        result.explanation,
+        "",
+        "=" * 50,
+    ]
     return "\n".join(lines)
 
 
